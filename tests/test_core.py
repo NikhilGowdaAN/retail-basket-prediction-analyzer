@@ -5,7 +5,14 @@ They start skipped. Remove the `skip` line as you work on each milestone.
 import numpy as np
 import pytest
 
-from app.core import milestone_1, milestone_2, load_basket_dataset, NGramModel
+from app.core import (
+    milestone_1,
+    milestone_2,
+    milestone_3,
+    load_basket_dataset,
+    NGramModel,
+    SmallLanguageModel,
+)
 from app.storage import Store
 
 
@@ -141,9 +148,59 @@ def test_cli_ngram_commands(tmp_path, capsys):
 
 
 # Milestone 3: Pretrain a small language model (like in the drill) on the basket sequences.
-@pytest.mark.skip(reason="remove this line when you start milestone 3")
-def test_milestone_3():
-    raise NotImplementedError("write the test for milestone 3")
+def test_milestone_3(tmp_path):
+    data_dir = tmp_path / "baskets"
+    model_path = tmp_path / "lm_model.npz"
+
+    # Pretrain model via milestone_3
+    model = milestone_3(
+        steps=50,
+        batch_size=8,
+        d_model=16,
+        data_dir=data_dir,
+        model_path=model_path,
+        seed=42,
+    )
+    assert len(model.vocabulary) > 0
+    assert model_path.exists()
+
+    # Verify model loading
+    loaded = SmallLanguageModel.load(model_path)
+    assert loaded.vocab_size == model.vocab_size
+    assert loaded.d_model == model.d_model
+
+    # Verify candidate scoring
+    dataset = load_basket_dataset(data_dir)
+    sample_basket = dataset.baskets[0]
+    scores = model.score_candidates(sample_basket[:2])
+    assert len(scores) == len(model.vocabulary)
+    assert np.all(np.isfinite(scores))
+
+    # Verify next-item prediction
+    top_preds = model.predict_next(sample_basket[:2], top_k=5, exclude=sample_basket[:2])
+    assert len(top_preds) == 5
+    for item in sample_basket[:2]:
+        assert item not in top_preds
+
+    # Verify store metadata
+    store = Store()
+    meta = store.get("milestone_3")
+    assert meta is not None
+    assert meta["steps"] == 50
+    assert meta["d_model"] == 16
+
+
+def test_cli_lm_commands(tmp_path, capsys):
+    from app.cli import main
+    model_path = tmp_path / "cli_lm.npz"
+    main(["train-lm", "--steps", "20", "--batch-size", "4", "--d-model", "16", "--data-dir", "data/synthetic_baskets", "--model-path", str(model_path)])
+    out = capsys.readouterr().out
+    assert "Pretraining complete." in out
+    assert model_path.exists()
+
+    main(["predict-lm", "--model-path", str(model_path), "--context", "Crunchy Crust Bread 400 g", "--top-k", "3"])
+    pred_out = capsys.readouterr().out
+    assert "Top LM Predictions:" in pred_out
 
 
 # Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).

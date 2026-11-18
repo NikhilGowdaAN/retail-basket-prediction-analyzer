@@ -26,6 +26,20 @@ def main(argv: list[str] | None = None) -> None:
     pred_ng.add_argument("--top-k", "-k", type=int, default=5, help="number of predictions to return")
     pred_ng.add_argument("--allow-duplicates", action="store_true", help="allow predicting items already in context")
 
+    train_lm = sub.add_parser("train-lm", help="pretrain small language model on baskets")
+    train_lm.add_argument("--steps", type=int, default=500, help="number of training steps (default: 500)")
+    train_lm.add_argument("--batch-size", type=int, default=16, help="batch size (default: 16)")
+    train_lm.add_argument("--d-model", type=int, default=32, help="embedding dimension (default: 32)")
+    train_lm.add_argument("--lr", type=float, default=0.005, help="learning rate (default: 0.005)")
+    train_lm.add_argument("--data-dir", type=str, default="data/synthetic_baskets", help="path to dataset directory")
+    train_lm.add_argument("--model-path", type=str, default="data/lm_model.npz", help="path to save model")
+
+    pred_lm = sub.add_parser("predict-lm", help="predict next item using pretrained small language model")
+    pred_lm.add_argument("--context", "-c", type=str, required=True, help="semicolon-separated item names in basket")
+    pred_lm.add_argument("--model-path", type=str, default="data/lm_model.npz", help="path to trained model")
+    pred_lm.add_argument("--top-k", "-k", type=int, default=5, help="number of predictions to return")
+    pred_lm.add_argument("--allow-duplicates", action="store_true", help="allow predicting items already in context")
+
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -74,6 +88,37 @@ def main(argv: list[str] | None = None) -> None:
         print("Top Predictions:")
         for rank, (item, score) in enumerate(predictions, 1):
             print(f"  {rank}. {item} (score: {score:.5f})")
+    elif args.command == "train-lm":
+        from app.core import milestone_3
+        print(f"Pretraining small language model for {args.steps} steps...")
+        model = milestone_3(
+            steps=args.steps,
+            batch_size=args.batch_size,
+            d_model=args.d_model,
+            lr=args.lr,
+            data_dir=args.data_dir,
+            model_path=args.model_path,
+            log_fn=print,
+        )
+        print(f"Pretraining complete. Vocabulary: {len(model.vocabulary):,} items.")
+        print(f"Saved language model to {args.model_path}")
+    elif args.command == "predict-lm":
+        from pathlib import Path
+        from app.core import SmallLanguageModel, milestone_3
+        p = Path(args.model_path)
+        if p.exists():
+            model = SmallLanguageModel.load(p)
+        else:
+            print(f"Model file {args.model_path} not found. Training small model first...")
+            model = milestone_3(steps=100, model_path=args.model_path)
+
+        context_items = [item.strip() for item in args.context.split(";") if item.strip()]
+        exclude = () if args.allow_duplicates else context_items
+        predictions = model.predict_next(context_items, top_k=args.top_k, exclude=exclude, return_scores=True)
+        print(f"Context: {context_items}")
+        print("Top LM Predictions:")
+        for rank, (item, score) in enumerate(predictions, 1):
+            print(f"  {rank}. {item} (log-score: {score:.5f})")
 
 
 if __name__ == "__main__":
