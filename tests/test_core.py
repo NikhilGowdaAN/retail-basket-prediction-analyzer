@@ -2,6 +2,7 @@
 
 They start skipped. Remove the `skip` line as you work on each milestone.
 """
+import json
 import numpy as np
 import pytest
 
@@ -9,9 +10,11 @@ from app.core import (
     milestone_1,
     milestone_2,
     milestone_3,
+    milestone_4,
     load_basket_dataset,
     NGramModel,
     SmallLanguageModel,
+    evaluate_model,
 )
 from app.storage import Store
 
@@ -204,9 +207,70 @@ def test_cli_lm_commands(tmp_path, capsys):
 
 
 # Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
-def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+def test_milestone_4(tmp_path):
+    data_dir = tmp_path / "baskets"
+    ngram_path = tmp_path / "ngram.json"
+    lm_path = tmp_path / "lm.npz"
+    results_path = tmp_path / "eval_results.json"
+
+    # Run milestone_4 evaluation
+    results = milestone_4(
+        data_dir=data_dir,
+        ngram_path=ngram_path,
+        lm_path=lm_path,
+        n_cases=30,
+        seed=42,
+        output_path=results_path,
+    )
+
+    assert results["n_cases"] == 30
+    assert "ngram" in results
+    assert "lm" in results
+
+    # Verify metrics for both models
+    for key in ("ngram", "lm"):
+        m = results[key]
+        assert "accuracy" in m
+        assert "hits@1" in m
+        assert "hits@5" in m
+        assert "hits@10" in m
+        assert "hits@50" in m
+        assert "mrr" in m
+        assert "median_rank" in m
+        assert "mean_rank" in m
+        assert 0.0 <= m["accuracy"] <= 1.0
+        assert 0.0 <= m["mrr"] <= 1.0
+        assert m["median_rank"] >= 1.0
+        assert m["mean_rank"] >= 1.0
+
+    # Verify ranks list
+    assert len(results["ngram_ranks"]) == 30
+    assert len(results["lm_ranks"]) == 30
+
+    # Verify results file saved
+    assert results_path.exists()
+    saved = json.loads(results_path.read_text())
+    assert saved["n_cases"] == 30
+    assert "ngram" in saved
+
+    # Verify store recorded evaluation
+    store = Store()
+    meta = store.get("milestone_4")
+    assert meta is not None
+    assert meta["n_cases"] == 30
+    assert "ngram_accuracy" in meta
+    assert "lm_accuracy" in meta
+
+
+def test_cli_evaluate_command(tmp_path, capsys):
+    from app.cli import main
+    eval_file = tmp_path / "cli_eval.json"
+    main(["evaluate", "--cases", "15", "--data-dir", "data/synthetic_baskets", "--output-path", str(eval_file)])
+    out = capsys.readouterr().out
+    assert "Accuracy (Hits@1)" in out
+    assert "MRR" in out
+    assert "Median Rank" in out
+    assert eval_file.exists()
 
 
 # Milestone 5: Present a comparison of the models' performance.

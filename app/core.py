@@ -3,7 +3,7 @@
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from thilimarketbasket.dataset import (
@@ -12,6 +12,7 @@ from thilimarketbasket.dataset import (
     load_dataset,
     save_dataset,
 )
+from thilimarketbasket.evaluate import make_cases, rank_of, summarise
 from thilimarketbasket.generate import (
     background_baskets,
     default_planted,
@@ -709,10 +710,137 @@ def milestone_3(
     return model
 
 
+def evaluate_model(
+    model: Union[NGramModel, SmallLanguageModel],
+    cases: Sequence[dict],
+    candidates: Sequence[str],
+    ks: Sequence[int] = (1, 5, 10, 50),
+) -> Dict[str, Any]:
+    """Evaluate next-item prediction metrics for a model on test cases.
+
+    For each case {"visible": [...], "target": item_name}:
+    - Model scores all candidate items given visible context.
+    - Computes rank of the hidden target item (excluding visible items).
+    - Summarizes Accuracy (Hits@1), Hits@K, MRR, Median Rank, and Mean Rank.
+    """
+    candidates = list(candidates)
+    position = {name: i for i, name in enumerate(candidates)}
+    ranks = []
+
+    for case in cases:
+        visible = case["visible"]
+        target = case["target"]
+        if target not in position:
+            continue
+        scores = model.score_candidates(visible, candidates=candidates)
+        exclude_indices = [position[v] for v in visible if v in position]
+        r = rank_of(scores, position[target], exclude_indices)
+        ranks.append(int(r))
+
+    if not ranks:
+        return {
+            "accuracy": 0.0,
+            "hits@1": 0.0,
+            "mrr": 0.0,
+            "median_rank": 0.0,
+            "mean_rank": 0.0,
+            "n_evaluated": 0,
+            "ranks": [],
+        }
+
+    summary: Dict[str, Any] = summarise(ranks, ks=ks)
+    summary["accuracy"] = summary.get("hits@1", 0.0)
+    summary["mean_rank"] = float(np.mean(ranks))
+    summary["n_evaluated"] = len(ranks)
+    summary["ranks"] = ranks
+    return summary
+
+
 # --- Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).
 # Hint: Calculate standard next-item prediction metrics like accuracy or rank.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+def milestone_4(
+    ngram_model: Optional[NGramModel] = None,
+    lm_model: Optional[SmallLanguageModel] = None,
+    dataset: Optional[Dataset] = None,
+    data_dir: Optional[Union[str, Path]] = "data/synthetic_baskets",
+    ngram_path: Optional[Union[str, Path]] = "data/ngram_model.json",
+    lm_path: Optional[Union[str, Path]] = "data/lm_model.npz",
+    n_cases: int = 200,
+    seed: int = 42,
+    output_path: Optional[Union[str, Path]] = "data/evaluation_results.json",
+    log_fn: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Milestone 4: Evaluate both models using next-item prediction metrics."""
+    # 1. Load or generate dataset
+    if dataset is None:
+        p = Path(data_dir) if data_dir else None
+        if p and (p / "baskets.jsonl").exists():
+            dataset = load_basket_dataset(p)
+        else:
+            dataset = milestone_1(output_dir=data_dir)
+
+    # 2. Load or train NGramModel
+    if ngram_model is None:
+        p_ng = Path(ngram_path) if ngram_path else None
+        if p_ng and p_ng.exists():
+            ngram_model = NGramModel.load(p_ng)
+        else:
+            ngram_model = milestone_2(dataset=dataset, model_path=ngram_path)
+
+    # 3. Load or train SmallLanguageModel
+    if lm_model is None:
+        p_lm = Path(lm_path) if lm_path else None
+        if p_lm and p_lm.exists():
+            lm_model = SmallLanguageModel.load(p_lm)
+        else:
+            lm_model = milestone_3(dataset=dataset, model_path=lm_path)
+
+    # 4. Prepare evaluation cases and candidate items
+    catalog_names = [item.name for item in dataset.catalog] if dataset.catalog else sorted({it for b in dataset.baskets for it in b})
+    valid_baskets = [b for b in dataset.baskets if len(set(b)) >= 2]
+    cases = make_cases(valid_baskets, catalog_names, n_cases=n_cases, seed=seed)
+
+    # 5. Evaluate both models
+    if log_fn:
+        log_fn(f"Evaluating N-gram model on {len(cases)} cases...")
+    ngram_results = evaluate_model(ngram_model, cases, catalog_names)
+
+    if log_fn:
+        log_fn(f"Evaluating Small Language Model on {len(cases)} cases...")
+    lm_results = evaluate_model(lm_model, cases, catalog_names)
+
+    results = {
+        "n_cases": len(cases),
+        "seed": seed,
+        "ngram": {k: v for k, v in ngram_results.items() if k != "ranks"},
+        "lm": {k: v for k, v in lm_results.items() if k != "ranks"},
+        "ngram_ranks": ngram_results["ranks"],
+        "lm_ranks": lm_results["ranks"],
+    }
+
+    # 6. Save results if requested
+    if output_path is not None:
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(json.dumps(results, indent=2))
+
+    # 7. Record in Store
+    store = Store()
+    store.put(
+        "milestone_4",
+        {
+            "n_cases": len(cases),
+            "ngram_accuracy": ngram_results.get("accuracy"),
+            "ngram_mrr": ngram_results.get("mrr"),
+            "ngram_median_rank": ngram_results.get("median_rank"),
+            "lm_accuracy": lm_results.get("accuracy"),
+            "lm_mrr": lm_results.get("mrr"),
+            "lm_median_rank": lm_results.get("median_rank"),
+            "output_path": str(output_path) if output_path else None,
+        },
+    )
+
+    return results
 
 
 # --- Milestone 5: Present a comparison of the models' performance.

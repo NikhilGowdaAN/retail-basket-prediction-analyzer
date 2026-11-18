@@ -40,6 +40,14 @@ def main(argv: list[str] | None = None) -> None:
     pred_lm.add_argument("--top-k", "-k", type=int, default=5, help="number of predictions to return")
     pred_lm.add_argument("--allow-duplicates", action="store_true", help="allow predicting items already in context")
 
+    eval_parser = sub.add_parser("evaluate", help="evaluate both n-gram model and small language model on next-item prediction")
+    eval_parser.add_argument("--data-dir", type=str, default="data/synthetic_baskets", help="path to dataset directory")
+    eval_parser.add_argument("--ngram-path", type=str, default="data/ngram_model.json", help="path to n-gram model")
+    eval_parser.add_argument("--lm-path", type=str, default="data/lm_model.npz", help="path to small language model")
+    eval_parser.add_argument("--cases", type=int, default=200, help="number of test cases to evaluate (default: 200)")
+    eval_parser.add_argument("--seed", type=int, default=42, help="random seed for evaluation cases (default: 42)")
+    eval_parser.add_argument("--output-path", type=str, default="data/evaluation_results.json", help="path to save evaluation metrics JSON")
+
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -119,6 +127,33 @@ def main(argv: list[str] | None = None) -> None:
         print("Top LM Predictions:")
         for rank, (item, score) in enumerate(predictions, 1):
             print(f"  {rank}. {item} (log-score: {score:.5f})")
+    elif args.command == "evaluate":
+        from app.core import milestone_4
+        print(f"Evaluating N-gram model and Small Language Model on {args.cases} test cases...")
+        results = milestone_4(
+            data_dir=args.data_dir,
+            ngram_path=args.ngram_path,
+            lm_path=args.lm_path,
+            n_cases=args.cases,
+            seed=args.seed,
+            output_path=args.output_path,
+            log_fn=print,
+        )
+        ng = results["ngram"]
+        lm = results["lm"]
+        print("\n" + "=" * 65)
+        print(f"{'Metric':<20} | {'N-Gram Model':<18} | {'Small LM':<18}")
+        print("-" * 65)
+        print(f"{'Accuracy (Hits@1)':<20} | {ng.get('accuracy', 0.0):<18.4f} | {lm.get('accuracy', 0.0):<18.4f}")
+        print(f"{'Hits@5':<20} | {ng.get('hits@5', 0.0):<18.4f} | {lm.get('hits@5', 0.0):<18.4f}")
+        print(f"{'Hits@10':<20} | {ng.get('hits@10', 0.0):<18.4f} | {lm.get('hits@10', 0.0):<18.4f}")
+        print(f"{'Hits@50':<20} | {ng.get('hits@50', 0.0):<18.4f} | {lm.get('hits@50', 0.0):<18.4f}")
+        print(f"{'MRR':<20} | {ng.get('mrr', 0.0):<18.4f} | {lm.get('mrr', 0.0):<18.4f}")
+        print(f"{'Median Rank':<20} | {ng.get('median_rank', 0.0):<18.1f} | {lm.get('median_rank', 0.0):<18.1f}")
+        print(f"{'Mean Rank':<20} | {ng.get('mean_rank', 0.0):<18.1f} | {lm.get('mean_rank', 0.0):<18.1f}")
+        print("=" * 65)
+        if args.output_path:
+            print(f"Results saved to {args.output_path}")
 
 
 if __name__ == "__main__":
