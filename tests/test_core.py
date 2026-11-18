@@ -2,9 +2,10 @@
 
 They start skipped. Remove the `skip` line as you work on each milestone.
 """
+import numpy as np
 import pytest
 
-from app.core import milestone_1, load_basket_dataset
+from app.core import milestone_1, milestone_2, load_basket_dataset, NGramModel
 from app.storage import Store
 
 
@@ -74,9 +75,69 @@ def test_cli_generate_command(tmp_path, capsys):
 
 
 # Milestone 2: Implement the n-gram model to predict next items in a basket.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
-def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+def test_milestone_2(tmp_path):
+    data_dir = tmp_path / "baskets"
+    model_path = tmp_path / "ngram_model.json"
+
+    # Train model via milestone_2
+    model = milestone_2(n=2, data_dir=data_dir, model_path=model_path)
+    assert model.n == 2
+    assert len(model.vocabulary) > 0
+    assert model_path.exists()
+
+    # Verify model loading
+    loaded = NGramModel.load(model_path)
+    assert loaded.n == 2
+    assert len(loaded.vocabulary) == len(model.vocabulary)
+
+    # Verify predictions on planted itemsets
+    # Load dataset to inspect planted pairs
+    dataset = load_basket_dataset(data_dir)
+    high_support_pairs = [p for p in dataset.planted if len(p.items) == 2 and p.support >= 0.01]
+    assert len(high_support_pairs) > 0
+
+    item_a, item_b = high_support_pairs[0].items
+    # Given item_a, predict next items (excluding item_a)
+    top_preds = model.predict_next([item_a], top_k=10, exclude=[item_a])
+    assert item_b in top_preds
+
+    # Verify backoff on unseen context
+    unseen_context = ["UnknownItemABC_XYZ"]
+    fallback_preds = model.predict_next(unseen_context, top_k=5)
+    assert len(fallback_preds) == 5
+    # Should fall back to top unigrams
+    top_unigram = model.predict_next([], top_k=1)[0]
+    assert top_unigram in fallback_preds
+
+    # Verify varying n
+    unigram_model = NGramModel(n=1).fit(dataset.baskets[:500])
+    assert unigram_model.n == 1
+    trigram_model = NGramModel(n=3).fit(dataset.baskets[:500])
+    assert trigram_model.n == 3
+
+    scores = trigram_model.score_candidates([item_a, item_b])
+    assert len(scores) == len(trigram_model.vocabulary)
+    assert np.all(scores >= 0)
+
+    # Verify store metadata
+    store = Store()
+    meta = store.get("milestone_2")
+    assert meta is not None
+    assert meta["n"] == 2
+    assert meta["vocab_size"] == len(model.vocabulary)
+
+
+def test_cli_ngram_commands(tmp_path, capsys):
+    from app.cli import main
+    model_path = tmp_path / "cli_ngram.json"
+    main(["train-ngram", "--n", "2", "--data-dir", "data/synthetic_baskets", "--model-path", str(model_path)])
+    out = capsys.readouterr().out
+    assert "Trained 2-gram model successfully" in out
+    assert model_path.exists()
+
+    main(["predict-ngram", "--model-path", str(model_path), "--context", "Crunchy Crust Bread 400 g", "--top-k", "3"])
+    pred_out = capsys.readouterr().out
+    assert "Top Predictions:" in pred_out
 
 
 # Milestone 3: Pretrain a small language model (like in the drill) on the basket sequences.
