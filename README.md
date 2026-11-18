@@ -22,7 +22,7 @@ Tick these off as you go, and commit after each one.
       Hint: Adapt the language model training process from "Teach a Language Model What Sells Together".
 - [x] **4. Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).**  
       Hint: Calculate standard next-item prediction metrics like accuracy or rank.
-- [ ] **5. Present a comparison of the models' performance.**  
+- [x] **5. Present a comparison of the models' performance.**  
       Hint: Summarize and compare the evaluation results from both models.
 
 ## Run it

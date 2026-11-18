@@ -11,10 +11,12 @@ from app.core import (
     milestone_2,
     milestone_3,
     milestone_4,
+    milestone_5,
     load_basket_dataset,
     NGramModel,
     SmallLanguageModel,
     evaluate_model,
+    format_comparison_report,
 )
 from app.storage import Store
 
@@ -274,7 +276,71 @@ def test_cli_evaluate_command(tmp_path, capsys):
 
 
 # Milestone 5: Present a comparison of the models' performance.
-@pytest.mark.skip(reason="remove this line when you start milestone 5")
-def test_milestone_5():
-    raise NotImplementedError("write the test for milestone 5")
+def test_milestone_5(tmp_path):
+    report_file = tmp_path / "comparison_report.md"
+
+    # Mock evaluation results
+    mock_eval = {
+        "n_cases": 20,
+        "seed": 42,
+        "ngram": {
+            "accuracy": 0.10,
+            "hits@1": 0.10,
+            "hits@5": 0.20,
+            "hits@10": 0.30,
+            "hits@50": 0.50,
+            "mrr": 0.15,
+            "median_rank": 40.0,
+            "mean_rank": 85.0,
+        },
+        "lm": {
+            "accuracy": 0.05,
+            "hits@1": 0.05,
+            "hits@5": 0.15,
+            "hits@10": 0.25,
+            "hits@50": 0.60,
+            "mrr": 0.11,
+            "median_rank": 35.0,
+            "mean_rank": 75.0,
+        },
+        "ngram_ranks": [1, 2, 5, 10, 20, 50, 100, 150, 200, 300, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512],
+        "lm_ranks": [3, 4, 5, 8, 15, 40, 80, 120, 180, 250, 2, 3, 5, 7, 14, 28, 50, 100, 200, 400],
+    }
+
+    comp = milestone_5(
+        eval_results=mock_eval,
+        report_path=report_file,
+    )
+
+    assert comp["n_cases"] == 20
+    assert "win_rates" in comp
+    assert "ngram_wins" in comp["win_rates"]
+    assert "lm_wins" in comp["win_rates"]
+    assert "ties" in comp["win_rates"]
+    assert len(comp["key_findings"]) > 0
+    assert "report_text" in comp
+    assert report_file.exists()
+
+    content = report_file.read_text()
+    assert "Model Comparison Report" in content
+    assert "Predictive Performance Metrics" in content
+    assert "Head-to-Head Case Comparison" in content
+    assert "Key Findings & Behavioral Analysis" in content
+
+    # Check store
+    store = Store()
+    meta = store.get("milestone_5")
+    assert meta is not None
+    assert meta["n_cases"] == 20
+    assert "ngram_wins" in meta
+
+
+def test_cli_compare_command(tmp_path, capsys):
+    from app.cli import main
+    report_file = tmp_path / "cli_report.md"
+    main(["compare", "--results-path", "data/evaluation_results.json", "--report-path", str(report_file)])
+    out = capsys.readouterr().out
+    assert "Model Comparison Report" in out
+    assert "Head-to-Head Case Comparison" in out
+    assert report_file.exists()
 

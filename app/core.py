@@ -843,7 +843,186 @@ def milestone_4(
     return results
 
 
+def format_comparison_report(comparison: Dict[str, Any]) -> str:
+    """Format a detailed Markdown / terminal report comparing the two models."""
+    ng = comparison["metrics"]["ngram"]
+    lm = comparison["metrics"]["lm"]
+    wins = comparison["win_rates"]
+    findings = comparison["key_findings"]
+
+    lines = [
+        "# Retail Basket Prediction: Model Comparison Report",
+        "",
+        f"**Evaluation Scope**: {comparison['n_cases']} test cases generated from simulated shopping baskets.",
+        "",
+        "## 1. Predictive Performance Metrics",
+        "",
+        "| Metric | N-Gram Model | Small Language Model | Delta (LM - N-Gram) | Winner |",
+        "| :--- | :--- | :--- | :--- | :--- |",
+    ]
+
+    metric_labels = [
+        ("accuracy", "Accuracy (Hits@1)", False),
+        ("hits@5", "Hits@5", False),
+        ("hits@10", "Hits@10", False),
+        ("hits@50", "Hits@50", False),
+        ("mrr", "Mean Reciprocal Rank (MRR)", False),
+        ("median_rank", "Median Rank (lower is better)", True),
+        ("mean_rank", "Mean Rank (lower is better)", True),
+    ]
+
+    for key, label, lower_better in metric_labels:
+        v_ng = ng.get(key, 0.0)
+        v_lm = lm.get(key, 0.0)
+        diff = v_lm - v_ng
+        if lower_better:
+            winner = "Small LM" if diff < -1e-5 else ("N-Gram" if diff > 1e-5 else "Tie")
+            fmt = ".1f"
+        else:
+            winner = "Small LM" if diff > 1e-5 else ("N-Gram" if diff < -1e-5 else "Tie")
+            fmt = ".4f"
+        sign = "+" if diff > 0 else ""
+        lines.append(f"| {label} | {v_ng:{fmt}} | {v_lm:{fmt}} | {sign}{diff:{fmt}} | **{winner}** |")
+
+    lines.extend([
+        "",
+        "## 2. Head-to-Head Case Comparison",
+        "",
+        f"- **N-Gram Model Ranked Higher**: {wins['ngram_wins']} cases ({wins['ngram_win_pct']:.1f}%)",
+        f"- **Small LM Ranked Higher**: {wins['lm_wins']} cases ({wins['lm_win_pct']:.1f}%)",
+        f"- **Tied Ranks**: {wins['ties']} cases ({wins['tie_pct']:.1f}%)",
+        "",
+        "## 3. Key Findings & Behavioral Analysis",
+        "",
+    ])
+    for finding in findings:
+        lines.append(f"- {finding}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 # --- Milestone 5: Present a comparison of the models' performance.
 # Hint: Summarize and compare the evaluation results from both models.
-def milestone_5():  # TODO(milestone 5)
-    raise NotImplementedError("TODO(milestone 5)")
+def milestone_5(
+    eval_results: Optional[Dict[str, Any]] = None,
+    results_path: Optional[Union[str, Path]] = "data/evaluation_results.json",
+    report_path: Optional[Union[str, Path]] = "data/comparison_report.md",
+    print_report: bool = False,
+    data_dir: Optional[Union[str, Path]] = "data/synthetic_baskets",
+    n_cases: int = 200,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Milestone 5: Present a comparison of the models' performance.
+
+    Summarizes and compares the evaluation results from both models.
+    """
+    if eval_results is None:
+        p = Path(results_path) if results_path else None
+        if p and p.exists():
+            eval_results = json.loads(p.read_text())
+        else:
+            eval_results = milestone_4(
+                data_dir=data_dir,
+                output_path=results_path,
+                n_cases=n_cases,
+                seed=seed,
+            )
+
+    ng_metrics = eval_results["ngram"]
+    lm_metrics = eval_results["lm"]
+    ng_ranks = eval_results.get("ngram_ranks", [])
+    lm_ranks = eval_results.get("lm_ranks", [])
+    total_cases = eval_results.get("n_cases", len(ng_ranks))
+
+    # Calculate win rates
+    ng_wins = sum(1 for r_ng, r_lm in zip(ng_ranks, lm_ranks) if r_ng < r_lm)
+    lm_wins = sum(1 for r_ng, r_lm in zip(ng_ranks, lm_ranks) if r_lm < r_ng)
+    ties = sum(1 for r_ng, r_lm in zip(ng_ranks, lm_ranks) if r_ng == r_lm)
+    n_compared = max(1, len(ng_ranks))
+
+    win_rates = {
+        "ngram_wins": ng_wins,
+        "ngram_win_pct": (ng_wins / n_compared) * 100,
+        "lm_wins": lm_wins,
+        "lm_win_pct": (lm_wins / n_compared) * 100,
+        "ties": ties,
+        "tie_pct": (ties / n_compared) * 100,
+    }
+
+    # Derive behavioral findings
+    findings = []
+    if ng_metrics.get("accuracy", 0) >= lm_metrics.get("accuracy", 0):
+        findings.append(
+            f"The N-gram model achieves higher top-1 accuracy ({ng_metrics.get('accuracy', 0):.2%} vs {lm_metrics.get('accuracy', 0):.2%}) "
+            "because its exact frequency counts strongly memorize dominant planted pairs (e.g. Bread & Butter, Tea & Sugar)."
+        )
+    else:
+        findings.append(
+            f"The Small Language Model achieves higher top-1 accuracy ({lm_metrics.get('accuracy', 0):.2%} vs {ng_metrics.get('accuracy', 0):.2%}) "
+            "by leveraging continuous representations to capture basket affinity."
+        )
+
+    if lm_metrics.get("hits@50", 0) >= ng_metrics.get("hits@50", 0):
+        findings.append(
+            f"The Small Language Model shows superior broad-recall (Hits@50: {lm_metrics.get('hits@50', 0):.2%} vs {ng_metrics.get('hits@50', 0):.2%}), "
+            "demonstrating that its dense embedding space generalizes well to rarer co-occurrences without suffering from cold-start zero counts."
+        )
+    else:
+        findings.append(
+            f"The N-gram model achieves higher broad-recall (Hits@50: {ng_metrics.get('hits@50', 0):.2%} vs {lm_metrics.get('hits@50', 0):.2%})."
+        )
+
+    if ng_metrics.get("mrr", 0) >= lm_metrics.get("mrr", 0):
+        findings.append(
+            f"N-gram leads in Mean Reciprocal Rank (MRR: {ng_metrics.get('mrr', 0):.4f} vs {lm_metrics.get('mrr', 0):.4f}), "
+            "ranking exact-match items higher on average."
+        )
+    else:
+        findings.append(
+            f"The Small Language Model leads in Mean Reciprocal Rank (MRR: {lm_metrics.get('mrr', 0):.4f} vs {ng_metrics.get('mrr', 0):.4f})."
+        )
+
+    findings.append(
+        "Trade-off Summary: N-gram models provide extremely fast, exact memorization of frequent co-purchases with low training overhead, "
+        "while causal neural language models learn continuous representations that generalize across varied contexts and long-tail items."
+    )
+
+    comparison_data = {
+        "n_cases": total_cases,
+        "metrics": {
+            "ngram": ng_metrics,
+            "lm": lm_metrics,
+        },
+        "win_rates": win_rates,
+        "key_findings": findings,
+    }
+
+    report_text = format_comparison_report(comparison_data)
+    comparison_data["report_text"] = report_text
+
+    if report_path is not None:
+        p_rep = Path(report_path)
+        p_rep.parent.mkdir(parents=True, exist_ok=True)
+        p_rep.write_text(report_text)
+
+    if print_report:
+        print(report_text)
+
+    # Store in key-value store
+    store = Store()
+    store.put(
+        "milestone_5",
+        {
+            "n_cases": total_cases,
+            "ngram_accuracy": ng_metrics.get("accuracy"),
+            "lm_accuracy": lm_metrics.get("accuracy"),
+            "ngram_mrr": ng_metrics.get("mrr"),
+            "lm_mrr": lm_metrics.get("mrr"),
+            "ngram_wins": ng_wins,
+            "lm_wins": lm_wins,
+            "report_path": str(report_path) if report_path else None,
+        },
+    )
+
+    return comparison_data

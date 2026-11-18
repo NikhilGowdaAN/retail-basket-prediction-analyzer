@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> None:
     eval_parser.add_argument("--seed", type=int, default=42, help="random seed for evaluation cases (default: 42)")
     eval_parser.add_argument("--output-path", type=str, default="data/evaluation_results.json", help="path to save evaluation metrics JSON")
 
+    comp_parser = sub.add_parser("compare", help="present and summarize comparative performance of n-gram and small LM")
+    comp_parser.add_argument("--results-path", type=str, default="data/evaluation_results.json", help="path to evaluation results JSON")
+    comp_parser.add_argument("--report-path", type=str, default="data/comparison_report.md", help="path to save markdown comparison report")
+
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -154,6 +158,13 @@ def main(argv: list[str] | None = None) -> None:
         print("=" * 65)
         if args.output_path:
             print(f"Results saved to {args.output_path}")
+    elif args.command == "compare":
+        from app.core import milestone_5
+        milestone_5(
+            results_path=args.results_path,
+            report_path=args.report_path,
+            print_report=True,
+        )
 
 
 if __name__ == "__main__":
